@@ -189,54 +189,88 @@ void UpdateDrawFrame(AppState* state)
     EndDrawing();
 }
 
+// Simplest possible layout system, top to bottom, possibly with half-width controls
+typedef struct UILayout_t
+{
+    int controlWidth;
+    int controlRectXStart;
+
+    int currentY;
+    bool isHalfFilled;
+    int lastHalfHeight;
+} UILayout;
+
+#define TEXT_HEIGHT 20
+#define FAT_CONTROL_HEIGHT 40
+
+static Rectangle LayoutFull(UILayout* layout, bool isText)
+{
+    if (layout->isHalfFilled)
+	{
+		layout->currentY += layout->lastHalfHeight;
+        layout->isHalfFilled = false;
+    }
+
+    const int height = isText ? TEXT_HEIGHT : FAT_CONTROL_HEIGHT;
+    Rectangle result = { layout->controlRectXStart, layout->currentY, layout->controlWidth, height };
+	layout->currentY += height;
+	return result;
+}
+
+static Rectangle LayoutHalf(UILayout* layout, bool isText)
+{
+    const int height = isText ? TEXT_HEIGHT : FAT_CONTROL_HEIGHT;
+    const int xStart = layout->isHalfFilled ? (layout->controlRectXStart + layout->controlWidth / 2) : layout->controlRectXStart;
+    Rectangle result = { xStart, layout->currentY, layout->controlWidth / 2, height };
+	layout->isHalfFilled = !layout->isHalfFilled;
+	layout->lastHalfHeight = height;
+	if (!layout->isHalfFilled)
+	{
+		layout->currentY += height;
+	}
+	return result;
+}
+
 UIUpdateResult UpdateDrawUI(AppState* state)
 {
-    const int controlWidth = 250;
-    const int controlRectXStart = state->windowWidth - controlWidth;
+    UILayout layout = {
+		.controlWidth = 250,
+		.controlRectXStart = state->windowWidth - 250,
+	};
 
-    const int textHeight = 20;
-    const int fatControlHeight = 40;
 
-    const int cellSizeLabelY = 0;
-    const int cellSizeSliderY = cellSizeLabelY + textHeight;
-    const int probabilityLabelsY = cellSizeSliderY + fatControlHeight;
-    const int probabilitySlidersY = probabilityLabelsY + textHeight;
-    const int dropdownLabelY = probabilitySlidersY + fatControlHeight;
-    const int dropdownY = dropdownLabelY + textHeight;
-    const int frequencyLabelY = dropdownY + fatControlHeight;
-    const int frequencySliderY = frequencyLabelY + textHeight;
-
-    const int fpsCheckBoxY = state->windowHeight - fatControlHeight;
-
-    GuiLabel((Rectangle) { controlRectXStart, cellSizeLabelY, controlWidth, textHeight }, "Cell size");
+    GuiLabel(LayoutFull(&layout, true), "Cell size");
     float floatCellSize = (float)state->cellSize;
     const bool cellSizeChanged = GuiSlider(
-        (Rectangle) { controlRectXStart, cellSizeSliderY, controlWidth, fatControlHeight }, 
+        LayoutFull(&layout, false),
         NULL, NULL, &floatCellSize, 3, 60
     );
     state->cellSize = (int)floatCellSize;
 
-    GuiLabel((Rectangle) { controlRectXStart, probabilityLabelsY, controlWidth / 2, textHeight }, "HP");
-    GuiLabel((Rectangle) { controlRectXStart + controlWidth / 2, probabilityLabelsY, controlWidth / 2, textHeight }, "VP");
-    const bool hpChanged = GuiSlider((Rectangle) { controlRectXStart, probabilitySlidersY, controlWidth / 2, fatControlHeight }, NULL, NULL, &state->horizontalProbability, 0.0, 1.0);
-    const bool vpChanged = GuiSlider((Rectangle) { controlRectXStart + controlWidth / 2, probabilitySlidersY, controlWidth / 2, fatControlHeight }, NULL, NULL, &state->verticalProbability, 0.0, 1.0);
+    GuiLabel(LayoutHalf(&layout, true), "HP");
+    GuiLabel(LayoutHalf(&layout, true), "VP");
+    const bool hpChanged = GuiSlider(LayoutHalf(&layout, false), NULL, NULL, &state->horizontalProbability, 0.0, 1.0);
+    const bool vpChanged = GuiSlider(LayoutHalf(&layout, false), NULL, NULL, &state->verticalProbability, 0.0, 1.0);
 
-    GuiLabel((Rectangle) { controlRectXStart, frequencyLabelY, controlWidth, textHeight }, "Update frequency");
-    GuiSlider((Rectangle) { controlRectXStart, frequencySliderY, controlWidth, fatControlHeight }, NULL, NULL, &state->updateSpeed, 0.0, 60.0);
+    Rectangle updateTypeLblRect = LayoutFull(&layout, true);
+    Rectangle updateTypeRect = LayoutFull(&layout, false);
+    GuiLabel(LayoutFull(&layout, true), "Update frequency");
+    GuiSlider(LayoutFull(&layout, false), NULL, NULL, &state->updateSpeed, 0.0, 60.0);
 
-    // It's actually higher, but needs to be lower to draw the dropdown above the slider 
-    GuiLabel((Rectangle) { controlRectXStart, dropdownLabelY, controlWidth, textHeight }, "Update type");
-    if (GuiDropdownBox((Rectangle) { controlRectXStart, dropdownY, controlWidth, fatControlHeight }, "REGENERATE;SHIFT", & state->updateType, state->updateTypeEditMode))
+    GuiLabel(updateTypeLblRect, "Update type");
+    if (GuiDropdownBox(updateTypeRect, "REGENERATE;SHIFT", & state->updateType, state->updateTypeEditMode))
         state->updateTypeEditMode = !state->updateTypeEditMode;
 
-    GuiCheckBox((Rectangle) { controlRectXStart, fpsCheckBoxY, fatControlHeight, fatControlHeight }, "Show FPS", &state->showFPS);
+    // Doesn't fit the layout system, but it's fine
+    const int fpsCheckBoxY = state->windowHeight - FAT_CONTROL_HEIGHT;
+    GuiCheckBox((Rectangle) { layout.controlRectXStart, fpsCheckBoxY, FAT_CONTROL_HEIGHT, FAT_CONTROL_HEIGHT }, "Show FPS", &state->showFPS);
     if (state->showFPS)
 	{
-		DrawFPS(controlRectXStart + controlWidth / 4 * 3, state->windowHeight - textHeight);
+		DrawFPS(layout.controlRectXStart + layout.controlWidth / 3 * 2, state->windowHeight - TEXT_HEIGHT);
 	}
 
     return (UIUpdateResult) {
-        .renderAreaWidth = controlRectXStart,
+        .renderAreaWidth = layout.controlRectXStart,
         .shouldRegenerate = cellSizeChanged || hpChanged || vpChanged,
     };
 }

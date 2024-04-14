@@ -13,6 +13,7 @@ typedef enum
 {
     UPDATE_REGENERATE,
     UPDATE_SHIFT,
+    UPDATE_SCROLL,
 } UpdateType;
 
 typedef struct AppState_t
@@ -28,6 +29,7 @@ typedef struct AppState_t
     int gridHeight;
     bool* verticalSequence;
     bool* horizontalSequence;
+    int* islands;
 
     double lastUpdateTime;
     float updateSpeed; // How many time per second to update
@@ -76,9 +78,15 @@ static void RegenerateSequences(AppState* state)
     {
         state->verticalSequence[i] = Uniform01Rand() < state->verticalProbability;
     }
+
+    if (state->islands)
+	{
+		free(state->islands);
+	}
+    state->islands = (int*)calloc(state->gridWidth * state->gridHeight, sizeof(int));
 }
 
-static void ShiftSequences(AppState* state)
+static void UniformShift(AppState* state)
 {
 	for (int i = 1; i < state->gridWidth; ++i)
 	{
@@ -91,6 +99,20 @@ static void ShiftSequences(AppState* state)
 		state->verticalSequence[state->gridHeight - i] = state->verticalSequence[state->gridHeight - 1 - i];
 	}
 	state->verticalSequence[0] = Uniform01Rand() < state->verticalProbability;
+}
+
+static void Scroll(AppState* state)
+{
+    for (int i = 1; i < state->gridWidth; ++i)
+    {
+        state->horizontalSequence[state->gridWidth - i] = state->horizontalSequence[state->gridWidth - 1 - i];
+    }
+    state->horizontalSequence[0] = Uniform01Rand() < state->horizontalProbability;
+
+	for (int i = 0; i < state->gridHeight; ++i)
+	{
+		state->verticalSequence[i] = !state->verticalSequence[i];
+	}
 }
 
 int main(void)
@@ -106,6 +128,7 @@ int main(void)
         .gridHeight = 0,
         .horizontalSequence = NULL,
         .verticalSequence = NULL,
+        .islands = NULL,
         .lastUpdateTime = 0.0,
         .updateSpeed = 10.0,
         .updateType = UPDATE_REGENERATE,
@@ -128,6 +151,53 @@ int main(void)
     return 0;
 }
 
+// FIXME: currently broken
+void FloodFill(AppState* state, int x, int y, int currentIsland)
+{
+    if (x < 0 || x >= state->gridWidth || y < 0 || y >= state->gridHeight)
+	{
+		return;
+	}
+    if (state->islands[y * state->gridWidth + x] != 0)
+	{
+		return;
+	}
+
+    state->islands[y * state->gridWidth + x] = currentIsland;
+    if (x - 1 >= 0 && state->islands[y * state->gridWidth + x - 1] == 0)
+	{
+        const int nextId = 
+            (state->horizontalSequence[x - 1] && x % 2 == 0) 
+            || (!state->horizontalSequence[x - 1] && x % 2 == 1) 
+            ? currentIsland : (currentIsland ^ 6);
+		FloodFill(state, x - 1, y, nextId); // Go left
+	}
+    if (x + 1 < state->gridWidth && state->islands[y * state->gridWidth + x + 1] == 0)
+	{
+        const int nextId =
+            (state->horizontalSequence[x] && x % 2 == 0)
+            || (!state->horizontalSequence[x] && x % 2 == 1)
+            ? currentIsland : (currentIsland ^ 6);
+        FloodFill(state, x + 1, y, nextId); // Go right
+	}
+	if (y - 1 >= 0 && state->islands[(y - 1) * state->gridWidth + x] == 0)
+	{
+        const int nextId =
+            (state->verticalSequence[y - 1] && x % 2 == 0)
+            || (!state->verticalSequence[y - 1] && x % 2 == 1)
+            ? currentIsland : (currentIsland ^ 6);
+		FloodFill(state, x, y - 1, nextId); // Go up
+	}
+	if (y + 1 < state->gridHeight && state->islands[(y + 1) * state->gridWidth + x] == 0)
+	{
+        const int nextId =
+            (state->verticalSequence[y] && x % 2 == 0)
+            || (!state->verticalSequence[y] && x % 2 == 1)
+            ? currentIsland : (currentIsland ^ 6);
+		FloodFill(state, x, y + 1, nextId); // Go down
+	}
+}
+
 void UpdateDrawFrame(AppState* state)
 {
     if (IsWindowResized())
@@ -146,9 +216,19 @@ void UpdateDrawFrame(AppState* state)
             RegenerateSequences(state);
             break;
         case UPDATE_SHIFT:
-            ShiftSequences(state);
+            UniformShift(state);
             break;
+        case UPDATE_SCROLL:
+            Scroll(state);
+			break;
         }
+    }
+
+    if (state->colored)
+    {
+        // Flood-fill the islands
+        memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
+        FloodFill(state, 0, 0, 2);
     }
 
     BeginDrawing();
@@ -161,29 +241,43 @@ void UpdateDrawFrame(AppState* state)
 		}
 
         const int cappedGridWidth = (uiUpdate.renderAreaWidth / state->cellSize) < state->gridWidth ? (uiUpdate.renderAreaWidth / state->cellSize - 1) : state->gridWidth;
-
-        // Horizontal pass
-        for (int i = 0; i < cappedGridWidth; ++i)
+        
+        if (!state->colored)
         {
-            const int offset = state->horizontalSequence[i] ? state->cellSize : 0;
-            int x = i * state->cellSize;
-            for (int j = 0; j < state->gridHeight; j += 2)
+            // Horizontal pass
+            for (int i = 0; i < cappedGridWidth; ++i)
             {
-                int y = j * state->cellSize + offset;
-                DrawLine(x, y, x, y + state->cellSize, BLACK);
+                const int offset = state->horizontalSequence[i] ? state->cellSize : 0;
+                int x = i * state->cellSize;
+                for (int j = 0; j < state->gridHeight; j += 2)
+                {
+                    int y = j * state->cellSize + offset;
+                    DrawLine(x, y, x, y + state->cellSize, BLACK);
+                }
+            }
+
+            // Vertical pass
+            for (int i = 0; i < state->gridHeight; ++i)
+            {
+                int offset = state->verticalSequence[i] ? state->cellSize : 0;
+                int y = i * state->cellSize;
+                for (int j = 0; j < cappedGridWidth; j += 2)
+                {
+                    int x = j * state->cellSize + offset;
+                    DrawLine(x, y, x + state->cellSize, y, BLACK);
+                }
             }
         }
-
-        // Vertical pass
-        for (int i = 0; i < state->gridHeight; ++i)
+        else
         {
-            int offset = state->verticalSequence[i] ? state->cellSize : 0;
-            int y = i * state->cellSize;
-            for (int j = 0; j < cappedGridWidth; j += 2)
-            {
-                int x = j * state->cellSize + offset;
-                DrawLine(x, y, x + state->cellSize, y, BLACK);
-            }
+			for (int i = 0; i < state->gridHeight; ++i)
+			{
+				for (int j = 0; j < cappedGridWidth; ++j)
+				{
+                    Color color = state->islands[i * state->gridWidth + j] == 2 ? RED : GREEN;
+					DrawRectangle(j * state->cellSize, i * state->cellSize, state->cellSize, state->cellSize, color);
+				}
+			}
         }
     }
     EndDrawing();
@@ -231,6 +325,19 @@ static Rectangle LayoutHalf(UILayout* layout, bool isText)
 	return result;
 }
 
+static Rectangle LayoutCheckbox(UILayout* layout)
+{
+    if (layout->isHalfFilled)
+    {
+        layout->currentY += layout->lastHalfHeight;
+        layout->isHalfFilled = false;
+    }
+
+    Rectangle result = { layout->controlRectXStart, layout->currentY, FAT_CONTROL_HEIGHT, FAT_CONTROL_HEIGHT };
+    layout->currentY += FAT_CONTROL_HEIGHT;
+    return result;
+}
+
 UIUpdateResult UpdateDrawUI(AppState* state)
 {
     UILayout layout = {
@@ -258,12 +365,12 @@ UIUpdateResult UpdateDrawUI(AppState* state)
     GuiSlider(LayoutFull(&layout, false), NULL, NULL, &state->updateSpeed, 0.0, 60.0);
 
     GuiLabel(updateTypeLblRect, "Update type");
-    if (GuiDropdownBox(updateTypeRect, "REGENERATE;SHIFT", & state->updateType, state->updateTypeEditMode))
+    if (GuiDropdownBox(updateTypeRect, "REGENERATE;SHIFT;SCROLL", &state->updateType, state->updateTypeEditMode))
         state->updateTypeEditMode = !state->updateTypeEditMode;
 
-    // Doesn't fit the layout system, but it's fine
-    const int fpsCheckBoxY = state->windowHeight - FAT_CONTROL_HEIGHT;
-    GuiCheckBox((Rectangle) { layout.controlRectXStart, fpsCheckBoxY, FAT_CONTROL_HEIGHT, FAT_CONTROL_HEIGHT }, "Show FPS", &state->showFPS);
+    GuiCheckBox(LayoutCheckbox(&layout), "Colored", &state->colored);
+    GuiCheckBox(LayoutCheckbox(&layout), "Show FPS", &state->showFPS);
+
     if (state->showFPS)
 	{
 		DrawFPS(layout.controlRectXStart + layout.controlWidth / 3 * 2, state->windowHeight - TEXT_HEIGHT);

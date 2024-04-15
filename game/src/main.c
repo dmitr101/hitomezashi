@@ -31,6 +31,8 @@ typedef struct AppState_t
     bool* horizontalSequence;
     int* islands;
 
+    int old00Island;
+
     double lastUpdateTime;
     float updateSpeed; // How many time per second to update
     int updateType;
@@ -129,6 +131,7 @@ int main(void)
         .horizontalSequence = NULL,
         .verticalSequence = NULL,
         .islands = NULL,
+        .old00Island = 0,
         .lastUpdateTime = 0.0,
         .updateSpeed = 10.0,
         .updateType = UPDATE_REGENERATE,
@@ -151,52 +154,27 @@ int main(void)
     return 0;
 }
 
-#define FLATTEN(x, y) ((y) * (state->gridWidth) + (x))
-#define FREE(x, y) (state->islands[FLATTEN(x, y)] == 0)
-#define INB(x, y) ((x) >= 0 && (x) < state->gridWidth && (y) >= 0 && (y) < state->gridHeight)
-#define H(x, y) ((((y) & 1) == 1) && (!state->horizontalSequence[(x)]) || (((y) & 1) != 1) && (state->horizontalSequence[(x)]))
-#define V(x, y) ((((x) & 1) == 1) && (!state->verticalSequence[(y)]) || (((x) & 1) != 1) && (state->verticalSequence[(y)]))
-
-typedef bool(*wallCheckFunc)(int x, int y, AppState* state);
-bool horizontalCheckLeft(int x, int y, AppState* state) { return H(x, y); }
-bool horizontalCheckRight(int x, int y, AppState* state) { return H(x + 1, y); }
-bool verticalCheckUp(int x, int y, AppState* state) { return V(x, y); }
-bool verticalCheckDown(int x, int y, AppState* state) { return V(x, y + 1); }
-
-typedef struct FloodFillCheck_t
+static void IterativeFill(AppState* state)
 {
-	int x;
-	int y;
-    wallCheckFunc f;
-} FloodFillCheck;
-
-static void FloodFill(AppState* state, int x, int y, int currentIsland)
-{
-    if (!FREE(x, y) || !INB(x, y))
+    int currentIsland = 2;
+    for (int y = 0; y < state->gridHeight; ++y)
 	{
-		return;
-	}
-
-    FloodFillCheck checks[] = {
-		{ x + 1, y, &horizontalCheckRight },
-		{ x - 1, y, &horizontalCheckLeft },
-		{ x, y + 1, &verticalCheckDown },
-		{ x, y - 1, &verticalCheckUp },
-	};
-
-    state->islands[FLATTEN(x, y)] = currentIsland;
-    for (int i = 0; i < 4; ++i)
-	{
-		if (INB(checks[i].x, checks[i].y) && FREE(checks[i].x, checks[i].y))
+        const bool yOdd = (y & 1) == 1;
+		for (int x = 0; x < state->gridWidth; ++x)
 		{
-            if (checks[i].f(x, y, state))
+			state->islands[y * state->gridWidth + x] = currentIsland;
+            if (x + 1 < state->gridWidth)
             {
-                FloodFill(state, checks[i].x, checks[i].y, currentIsland);
+                const bool nextShifted = state->horizontalSequence[x + 1];
+                const bool keep = yOdd && !nextShifted || !yOdd && nextShifted;
+                currentIsland = H(x + 1, y) ? currentIsland : currentIsland ^ 6;
             }
-			else
-			{
-				FloodFill(state, checks[i].x, checks[i].y, currentIsland ^ 6);
-			}
+		}
+
+        currentIsland = state->islands[y * state->gridWidth];
+        if (y + 1 < state->gridHeight)
+		{
+			currentIsland = state->verticalSequence[y + 1] ? currentIsland : currentIsland ^ 6;
 		}
 	}
 }
@@ -229,9 +207,8 @@ void UpdateDrawFrame(AppState* state)
 
     if (state->colored)
     {
-        // Flood-fill the islands
         memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
-        FloodFill(state, 0, 0, 2);
+        IterativeFill(state);
     }
 
     BeginDrawing();

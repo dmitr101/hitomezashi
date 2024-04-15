@@ -151,50 +151,53 @@ int main(void)
     return 0;
 }
 
-// FIXME: currently broken
-void FloodFill(AppState* state, int x, int y, int currentIsland)
+#define FLATTEN(x, y) ((y) * (state->gridWidth) + (x))
+#define FREE(x, y) (state->islands[FLATTEN(x, y)] == 0)
+#define INB(x, y) ((x) >= 0 && (x) < state->gridWidth && (y) >= 0 && (y) < state->gridHeight)
+#define H(x, y) ((((y) & 1) == 1) && (!state->horizontalSequence[(x)]) || (((y) & 1) != 1) && (state->horizontalSequence[(x)]))
+#define V(x, y) ((((x) & 1) == 1) && (!state->verticalSequence[(y)]) || (((x) & 1) != 1) && (state->verticalSequence[(y)]))
+
+typedef bool(*wallCheckFunc)(int x, int y, AppState* state);
+bool horizontalCheckLeft(int x, int y, AppState* state) { return H(x, y); }
+bool horizontalCheckRight(int x, int y, AppState* state) { return H(x + 1, y); }
+bool verticalCheckUp(int x, int y, AppState* state) { return V(x, y); }
+bool verticalCheckDown(int x, int y, AppState* state) { return V(x, y + 1); }
+
+typedef struct FloodFillCheck_t
 {
-    if (x < 0 || x >= state->gridWidth || y < 0 || y >= state->gridHeight)
-	{
-		return;
-	}
-    if (state->islands[y * state->gridWidth + x] != 0)
+	int x;
+	int y;
+    wallCheckFunc f;
+} FloodFillCheck;
+
+static void FloodFill(AppState* state, int x, int y, int currentIsland)
+{
+    if (!FREE(x, y) || !INB(x, y))
 	{
 		return;
 	}
 
-    state->islands[y * state->gridWidth + x] = currentIsland;
-    if (x - 1 >= 0 && state->islands[y * state->gridWidth + x - 1] == 0)
+    FloodFillCheck checks[] = {
+		{ x + 1, y, &horizontalCheckRight },
+		{ x - 1, y, &horizontalCheckLeft },
+		{ x, y + 1, &verticalCheckDown },
+		{ x, y - 1, &verticalCheckUp },
+	};
+
+    state->islands[FLATTEN(x, y)] = currentIsland;
+    for (int i = 0; i < 4; ++i)
 	{
-        const int nextId = 
-            (state->horizontalSequence[x - 1] && x % 2 == 0) 
-            || (!state->horizontalSequence[x - 1] && x % 2 == 1) 
-            ? currentIsland : (currentIsland ^ 6);
-		FloodFill(state, x - 1, y, nextId); // Go left
-	}
-    if (x + 1 < state->gridWidth && state->islands[y * state->gridWidth + x + 1] == 0)
-	{
-        const int nextId =
-            (state->horizontalSequence[x] && x % 2 == 0)
-            || (!state->horizontalSequence[x] && x % 2 == 1)
-            ? currentIsland : (currentIsland ^ 6);
-        FloodFill(state, x + 1, y, nextId); // Go right
-	}
-	if (y - 1 >= 0 && state->islands[(y - 1) * state->gridWidth + x] == 0)
-	{
-        const int nextId =
-            (state->verticalSequence[y - 1] && x % 2 == 0)
-            || (!state->verticalSequence[y - 1] && x % 2 == 1)
-            ? currentIsland : (currentIsland ^ 6);
-		FloodFill(state, x, y - 1, nextId); // Go up
-	}
-	if (y + 1 < state->gridHeight && state->islands[(y + 1) * state->gridWidth + x] == 0)
-	{
-        const int nextId =
-            (state->verticalSequence[y] && x % 2 == 0)
-            || (!state->verticalSequence[y] && x % 2 == 1)
-            ? currentIsland : (currentIsland ^ 6);
-		FloodFill(state, x, y + 1, nextId); // Go down
+		if (INB(checks[i].x, checks[i].y) && FREE(checks[i].x, checks[i].y))
+		{
+            if (checks[i].f(x, y, state))
+            {
+                FloodFill(state, checks[i].x, checks[i].y, currentIsland);
+            }
+			else
+			{
+				FloodFill(state, checks[i].x, checks[i].y, currentIsland ^ 6);
+			}
+		}
 	}
 }
 

@@ -157,6 +157,20 @@ int main(void)
 static void IterativeFill(AppState* state)
 {
     int currentIsland = 2;
+    if (state->old00Island != 0 && state->updateType == UPDATE_SCROLL)
+    {
+        switch (state->updateType)
+        {
+        case UPDATE_SCROLL:
+            currentIsland = state->horizontalSequence[1] ? state->old00Island : state->old00Island ^ 6;
+            break;
+        case UPDATE_SHIFT:
+            const bool keep = state->horizontalSequence[1] && !state->verticalSequence[1] || !state->horizontalSequence[1] && state->verticalSequence[1];
+            currentIsland = keep ? state->old00Island : state->old00Island ^ 6;
+            break;
+        }
+    }
+
     for (int y = 0; y < state->gridHeight; ++y)
 	{
         const bool yOdd = (y & 1) == 1;
@@ -177,6 +191,8 @@ static void IterativeFill(AppState* state)
 			currentIsland = state->verticalSequence[y + 1] ? currentIsland : currentIsland ^ 6;
 		}
 	}
+
+	state->old00Island = state->islands[0];
 }
 
 void UpdateDrawFrame(AppState* state)
@@ -203,12 +219,12 @@ void UpdateDrawFrame(AppState* state)
             Scroll(state);
 			break;
         }
-    }
 
-    if (state->colored)
-    {
-        memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
-        IterativeFill(state);
+        if (state->colored)
+        {
+            memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
+            IterativeFill(state);
+        }
     }
 
     BeginDrawing();
@@ -218,6 +234,7 @@ void UpdateDrawFrame(AppState* state)
         if (uiUpdate.shouldRegenerate)
 		{
 			RegenerateSequences(state);
+            state->old00Island = 0;
 		}
 
         const int cappedGridWidth = (uiUpdate.renderAreaWidth / state->cellSize) < state->gridWidth ? (uiUpdate.renderAreaWidth / state->cellSize - 1) : state->gridWidth;

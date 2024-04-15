@@ -39,6 +39,8 @@ typedef struct AppState_t
     bool updateTypeEditMode;
     bool showFPS;
     bool colored;
+
+    int diagonalScrollDirection;
 } AppState;
 
 typedef struct UIUpdateResult_t
@@ -88,33 +90,36 @@ static void RegenerateSequences(AppState* state)
     state->islands = (int*)calloc(state->gridWidth * state->gridHeight, sizeof(int));
 }
 
-static void UniformShift(AppState* state)
+static void GenericScroll(bool* primarySequence, int primaryLength, float primaryProbability, bool* secondarySequence, int secondaryLength)
 {
-	for (int i = 1; i < state->gridWidth; ++i)
-	{
-		state->horizontalSequence[state->gridWidth - i] = state->horizontalSequence[state->gridWidth - 1 - i];
-	}
-	state->horizontalSequence[0] = Uniform01Rand() < state->horizontalProbability;
+    for (int i = 1; i < primaryLength; ++i)
+    {
+        primarySequence[primaryLength - i] = primarySequence[primaryLength - 1 - i];
+    }
+    primarySequence[0] = Uniform01Rand() < primaryProbability;
 
-	for (int i = 1; i < state->gridHeight; ++i)
-	{
-		state->verticalSequence[state->gridHeight - i] = state->verticalSequence[state->gridHeight - 1 - i];
-	}
-	state->verticalSequence[0] = Uniform01Rand() < state->verticalProbability;
+    for (int i = 0; i < secondaryLength; ++i)
+    {
+        secondarySequence[i] = !secondarySequence[i];
+    }
 }
 
 static void Scroll(AppState* state)
 {
-    for (int i = 1; i < state->gridWidth; ++i)
-    {
-        state->horizontalSequence[state->gridWidth - i] = state->horizontalSequence[state->gridWidth - 1 - i];
-    }
-    state->horizontalSequence[0] = Uniform01Rand() < state->horizontalProbability;
+    GenericScroll(state->horizontalSequence, state->gridWidth, state->horizontalProbability, state->verticalSequence, state->gridHeight);
+}
 
-	for (int i = 0; i < state->gridHeight; ++i)
+static void DiagonalScroll(AppState* state)
+{
+	if (state->diagonalScrollDirection == 0)
 	{
-		state->verticalSequence[i] = !state->verticalSequence[i];
+		GenericScroll(state->horizontalSequence, state->gridWidth, state->horizontalProbability, state->verticalSequence, state->gridHeight);
 	}
+	else
+	{
+		GenericScroll(state->verticalSequence, state->gridHeight, state->verticalProbability, state->horizontalSequence, state->gridWidth);
+	}
+    state->diagonalScrollDirection = !state->diagonalScrollDirection;
 }
 
 int main(void)
@@ -137,6 +142,7 @@ int main(void)
         .updateType = UPDATE_REGENERATE,
         .updateTypeEditMode = false,
         .colored = false,
+        .diagonalScrollDirection = 0,
     };
     InitWindow(appState.windowWidth, appState.windowHeight, "hitomezashi pattern generator");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
@@ -156,8 +162,10 @@ int main(void)
 
 static void IterativeFill(AppState* state)
 {
+    memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
+
     int currentIsland = 2;
-    if (state->old00Island != 0 && state->updateType == UPDATE_SCROLL)
+    if (state->old00Island != 0)
     {
         switch (state->updateType)
         {
@@ -165,7 +173,7 @@ static void IterativeFill(AppState* state)
             currentIsland = state->horizontalSequence[1] ? state->old00Island : state->old00Island ^ 6;
             break;
         case UPDATE_SHIFT:
-            const bool keep = state->horizontalSequence[1] && !state->verticalSequence[1] || !state->horizontalSequence[1] && state->verticalSequence[1];
+            const bool keep = state->diagonalScrollDirection == 1 && state->horizontalSequence[1] || state->diagonalScrollDirection == 0 && state->verticalSequence[1];
             currentIsland = keep ? state->old00Island : state->old00Island ^ 6;
             break;
         }
@@ -213,16 +221,14 @@ void UpdateDrawFrame(AppState* state)
             RegenerateSequences(state);
             break;
         case UPDATE_SHIFT:
-            UniformShift(state);
+            DiagonalScroll(state);
             break;
         case UPDATE_SCROLL:
             Scroll(state);
 			break;
         }
-
         if (state->colored)
         {
-            memset(state->islands, 0, state->gridWidth * state->gridHeight * sizeof(int));
             IterativeFill(state);
         }
     }
@@ -235,6 +241,10 @@ void UpdateDrawFrame(AppState* state)
 		{
 			RegenerateSequences(state);
             state->old00Island = 0;
+            if (state->colored)
+            {
+                IterativeFill(state);
+            }
 		}
 
         const int cappedGridWidth = (uiUpdate.renderAreaWidth / state->cellSize) < state->gridWidth ? (uiUpdate.renderAreaWidth / state->cellSize - 1) : state->gridWidth;

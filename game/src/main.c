@@ -167,7 +167,7 @@ static void IterativeFill(AppState* state)
             {
                 const bool nextShifted = state->horizontalSequence[x + 1];
                 const bool keep = yOdd && !nextShifted || !yOdd && nextShifted;
-                currentIsland = H(x + 1, y) ? currentIsland : currentIsland ^ 6;
+                currentIsland = keep ? currentIsland : currentIsland ^ 6;
             }
 		}
 
